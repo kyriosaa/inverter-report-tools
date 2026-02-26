@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 # MASTER_CSV_PATH = r"C:\path\to\folder\Master_Inverter_Data.csv"
 # etc etc
 import private
+from config.colors import BOLD, RED, CYAN, YELLOW, GREEN, RESET
 
 # change ts to the email subject to pull the report from
 EMAIL_SUBJECT = "Taiwan Solar Floating - Monthly-Inverter Report"
@@ -30,7 +31,7 @@ def get_last_updated_date():
 
 # for if u have multiple outlook accounts
 def select_outlook_inbox(outlook):
-    print("\n--- Outlook Accounts ---")
+    print(f"\n{BOLD}{CYAN}Available Outlook Accounts:{RESET}")
     stores = []
     
     for i in range(1, outlook.Stores.Count + 1): # note that outlook indexes start at one instead of 0
@@ -40,17 +41,17 @@ def select_outlook_inbox(outlook):
         
     while True:
         try:
-            choice = int(input("\nEnter the number of the account you want to check: "))
+            choice = int(input(f"\n{BOLD}{CYAN}Select account (1-{stores.Count}): {RESET}")).strip()
             if 1 <= choice <= len(stores):
                 selected_store = stores[choice - 1]
                 # 6 is the default inbox folder
                 return selected_store.GetDefaultFolder(6)
             else:
-                print("Please select a valid number from the list.")
+                print(f"{BOLD}{RED}[ERROR]{RESET} Please select a valid number from the list.")
         except ValueError:
-            print("Please enter a number.")
+            print(f"{BOLD}{RED}[ERROR]{RESET} Please enter a number.")
         except Exception as err:
-            print(f"Error accessing folder: {err}. Please try again.")
+            print(f"{BOLD}{RED}[ERROR]{RESET} Error accessing folder: {err}. Please try again.")
 
 # scans local outlook app for emails newer than the last updated date and downloads attachments
 def fetch_missing_reports_from_outlook(last_date):
@@ -58,7 +59,7 @@ def fetch_missing_reports_from_outlook(last_date):
     
     # select inbox
     inbox = select_outlook_inbox(outlook)
-    print(f"\nScanning Inbox for '{inbox.Parent.Name}' for reports after {last_date}...")
+    print(f"\n{BOLD}{YELLOW}[STATUS]{RESET} Scanning Inbox for '{inbox.Parent.Name}' for reports after {last_date}...")
     
     messages = inbox.Items
     messages.Sort("[ReceivedTime]", True) # sort newest first
@@ -80,7 +81,7 @@ def fetch_missing_reports_from_outlook(last_date):
                         file_path = os.path.join(private.TEMP_DOWNLOAD_FOLDER, f"{received_date}_{attachment.FileName}")
                         attachment.SaveAsFile(file_path)
                         downloaded_files.append((received_date, file_path))
-                        print(f"Downloaded report for {received_date}")
+                        print(f"{BOLD}{YELLOW}[STATUS]{RESET} Downloaded report for {received_date}")
         except Exception:
             continue
             
@@ -133,7 +134,7 @@ def safe_read_report(file_path):
 # reads files, cleans data, then appends to master CSV
 def process_and_append_data(downloaded_files):
     if not downloaded_files:
-        print("No new reports found to process.")
+        print(f"{BOLD}{GREEN}[DONE]{RESET} No new reports found to process.")
         return False
 
     all_new_data = []
@@ -148,7 +149,7 @@ def process_and_append_data(downloaded_files):
             # filter only the columns we need for the database
             clean_df = df[['Plant Name', 'Device Name', 'Yield (kWh)']].copy()
         except KeyError:
-            print(f"Error: Could not find columns in report for {email_date}. Found columns: {df.columns.tolist()}")
+            print(f"{BOLD}{RED}[ERROR]{RESET} Could not find columns in report for {email_date}. Found columns: {df.columns.tolist()}")
             os.remove(file_path)
             continue
 
@@ -160,7 +161,7 @@ def process_and_append_data(downloaded_files):
         os.remove(file_path)
 
     if not all_new_data:
-        print("No usable data was extracted from the downloaded files.")
+        print(f"{BOLD}{RED}[ERROR]{RESET} No usable data was extracted from the downloaded files.")
         return False
 
     # combine all new days into one table
@@ -172,7 +173,7 @@ def process_and_append_data(downloaded_files):
     else:
         new_data_df.to_csv(private.MASTER_CSV_PATH, mode='w', header=True, index=False)
         
-    print(f"Successfully appended {len(new_data_df)} records to the Master CSV.")
+    print(f"{BOLD}{GREEN}[DONE]{RESET} Successfully appended {len(new_data_df)} records to the Master CSV.")
     return True
 
 # this is the view that makes it easy to read
@@ -180,18 +181,23 @@ def generate_report_view():
     if not os.path.exists(private.MASTER_CSV_PATH):
         return
         
-    print("Generating updated visual report...")
+    print(f"{BOLD}{YELLOW}[STATUS]{RESET} Generating updated visual report...")
     df = pd.read_csv(private.MASTER_CSV_PATH)
     
-    pivot_df = df.pivot_table(
-        index=['Plant Name', 'Device Name'], 
-        columns='Date', 
-        values='Yield (kWh)',
-        dropna=False
-    )
+    df_clean = df.drop_duplicates(subset=['Plant Name', 'Device Name', 'Date'])
+    pivot_df = df_clean.pivot(index=['Plant Name', 'Device Name'], columns='Date', values='Yield (kWh)')
+    
+    # sort by the actual inverter number
+    pivot_df = pivot_df.reset_index()
+    pivot_df['Inverter_Number'] = pivot_df['Device Name'].str.extract(r'(\d+)[^\d]*$').astype(float)
+    
+    # sort hierarchically
+    # first by plant, then by the extracted number, then by the original name as a fallback
+    pivot_df = pivot_df.sort_values(by=['Plant Name', 'Inverter_Number', 'Device Name'])
+    pivot_df = pivot_df.drop(columns=['Inverter_Number']).set_index(['Plant Name', 'Device Name'])
     
     pivot_df.to_csv(private.REPORT_VIEW_PATH)
-    print(f"Visual report saved to: {private.REPORT_VIEW_PATH}")
+    print(f"{BOLD}{GREEN}[DONE]{RESET} Visual report saved to: {private.REPORT_VIEW_PATH}")
 
 if __name__ == "__main__":
     last_date = get_last_updated_date()
@@ -202,4 +208,4 @@ if __name__ == "__main__":
     if data_added:
         generate_report_view()
     
-    print("Automation complete.")
+    print(f"{BOLD}{GREEN}Complete.{RESET}")
